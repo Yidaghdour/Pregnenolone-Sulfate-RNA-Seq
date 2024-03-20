@@ -1,0 +1,415 @@
+---
+title: "Pregnenolone Sulfate RNA-Seq"
+output: html_document
+date: "2022-10-05"
+---
+---
+title: "Pregnenolone Sulfate RNA-Seq"
+output: html_document
+date: "2022-10-05"
+
+
+```{r}
+install.packages("pheatmap")#Package for plotting pretty heatmaps.
+install.packages("ggridges")#Ridgeline plots are partially overlapping line plots that create the impression of a mountain range. They can be quite useful for visualizing changes in distributions over time or space.
+install.packages("pillar")
+install.packages("RColorBrewer")
+install.packages("BiocManager") #BiocManager helps in installing of packages from bioconductor compactible with the R version in use
+BiocManager::install(c("DESeq2","apeglm"),force = TRUE)# Package for shrinking log2 fold changes 
+BiocManager::install("clusterProfiler")#Package that implements methods to analyze and visualize functional profiles of genomic coordinates, gene and gene clusters.
+BiocManager::install("pathview")#Tool set for pathway based data integration and visualisation. It maps and renders a wide variaty of biological data on relevant pathway graph.
+BiocManager::install("enrichplot")#It implements serveral visualisation methods for interpreting functional enrichment results obtained from GSEA/ORA analysis.
+BiocManager::install("org.Hs.eg.db")#Genome wide annotation for Human, primarily based on mapping using Entrez Gene identifiers.
+install.packages("VennDiagram")               
+
+```
+
+
+1- Importing the count data and the metadata
+```{r}
+raw_counts <- read.csv("raw_counts.csv") #The input should be raw count data. DESq2 package will perform library size correction, and normalisation internally. 
+meta_data <- read.csv("metadata.csv")# The meta data is the experimental design file contains information about the samples. 
+```
+2- Formatting the raw_count data to get ncol(raw_counts)= nrow(raw_counts) necessary for deseq2 to run
+```{r}
+rownames(raw_counts) <- make.names(raw_counts$gene.names, unique = TRUE) #Set genes names as rownames and get rid of duplicates 
+raw_counts$gene.ids<-NULL# Remove GeneID Column and Gene Name  Column
+raw_counts$gene.names<-NULL # remove Gene column 
+View(raw_counts)# view the new raw counts table 
+
+#rownames(raw_counts) <- raw_counts$gene.ids #Make the gene.ids the row names 
+#raw_counts <- subset (raw_counts, select = -gene.ids)#Delete the column gene.ids
+#raw_counts
+row.names(meta_data) <- meta_data$S_number2 #Make the sample numbers the row names
+meta_data <- subset (meta_data, select = -S_number2)#Delete the column sample names
+meta_data
+
+idx <- match(rownames(meta_data), colnames(raw_counts))#Create an object that matches the columns of the count dta such that rownames(meta) == colnames(counts)
+idx
+raw_counts <- raw_counts[ , idx]
+all(colnames(raw_counts) %in% rownames(meta_data))#Make sure that all column names in raw_counts belong to rownames in meta_data
+all(colnames(raw_counts) == rownames(meta_data))# Make sure that colnmes(raw_counts) match rownames(meta_data)
+
+meta_data$Timepoint <- as.factor(meta_data$Timepoint)
+```
+**Activated time point 2**
+3- Subset activated samples
+```{r}
+library(dplyr)
+meta_data2 <- data.frame(meta_data)
+activated_meta_data_t2 <- select(filter(meta_data2, Activation == "Yes", Timepoint == 2),c("Activation", "Treatment","Timepoint"))
+
+activated_samples_t2 <- row.names(activated_meta_data_t2)
+
+row_counts2 <- data.frame(raw_counts)
+activated_counts_t2 <- row_counts2 %>% select (activated_samples_t2)
+```
+4- Initiation of the installed R packages 
+```{r}
+library("DESeq2")# Recall what has been installed. 
+library("EnhancedVolcano")
+```
+5- Creation of a Deseq2 matrix  
+```{r}
+dds_activated_t2 <- DESeqDataSetFromMatrix(countData = activated_counts_t2,#DESeqData builds a deseq2 matrix with information from htseqcount combines with the experimental design file.
+                                  colData = activated_meta_data_t2,
+                                  design= ~  Treatment)# The design formula should have all of the factors in your metadata that account for major sources of variation in your data. The last factor entered in the formula should be the condition of interest.
+
+```
+6- Filtering out genes with low expression
+```{r}
+keep <- rowSums(counts(dds_activated_t2)) >= 10 # We are removing the genes with very low expression aka we are removing genes for which the sum of counts across all samples is less than 10.
+dds_activated_t2 <- dds_activated_t2 [keep,]
+dds_activated_t2
+```
+7- Differential expression analysis, VST and rlog transformation for visualistion
+```{r}
+dds_activated_t2 <- DESeq(dds_activated_t2)#In this step we perform statistical test for each gene in the dataset. The Wald test is equivalent to "t-test" that compares the mean expression value of each gene between the control stages and treatment.In other words, at this point we actually runt the differntial expression analysis.
+vsd_activated_t2 <- varianceStabilizingTransformation(dds_activated_t2)
+```
+8- Fetching results from DESeq2 run 
+```{r}
+res_activated_t2 <- results(dds_activated_t2, contrast=c("Treatment", "Yes", "No"))# c("condition", "level to compare", "control"). You can add a "," after contrast to indicate alpha = 0.05.
+library(magrittr)
+res_activated_t2 %>% data.frame() %>% View() #Look at what information is stored in the results
+```
+9- Summarize the results
+```{r}
+summary(res_activated_t2)#summurise results
+resOrdered_activated_t2 <- res_activated_t2[order(res_activated_t2$pvalue),]#order the results table by smallest padjusted value 
+write.csv(as.data.frame(resOrdered_activated_t2), file="condition_treated_activated_t2_results.csv")# save the ordered file and export the output
+head(resOrdered_activated_t2,n=10)
+```
+10- Identification of significant genes 
+A-Upregulated genes 
+```{r}
+Upregulated_activated_t2 <- resOrdered_activated_t2[ which(resOrdered_activated_t2$padj < 0.05 & resOrdered_activated_t2$log2FoldChange > 0.263), ]#From resOrderes take the ones that are statistically significant and upregulated
+summary(Upregulated_activated_t2) 
+write.csv(as.data.frame(Upregulated_activated_t2), file="Upregulated_activated_t2_results.csv")
+
+```
+B- Downregulated genes 
+```{r}
+Downregulated_activated_t2 = resOrdered_activated_t2[ which(resOrdered_activated_t2$padj < 0.05 & resOrdered_activated_t2$log2FoldChange < -0.263), ]
+summary(Downregulated_activated_t2)
+write.csv(as.data.frame(Downregulated_activated_t2), file="Downregulated_activated_t2_results.csv")
+```
+c- Create list of significant genes 
+```{r}
+Significantgenes_activated_t2 <- rbind(Upregulated_activated_t2, Downregulated_activated_t2)
+write.csv(as.data.frame(Significantgenes_activated_t2), file="Significantgenes_results_activated_t2.csv")
+Significantgenes_activated_t2 <- as.list(Significantgenes_activated_t2@rownames)
+```
+
+D- Hierarchical clustering  
+```{r}
+install.packages("pheatmap")
+library(pheatmap)
+vsd_mat_activated_t2 <- assay(vsd_activated_t2)# Extract the vsd matrix from the object.
+
+upregulated_genes <-Upregulated_activated_t2@rownames
+vsd_mat2 <- data.frame(vsd_mat_activated_t2)
+norm_upregulated <- vsd_mat2 %>%
+  subset (row.names = ) %>%
+  data.frame #Subset the vsd valueupregulated_genes_activateds only for upregulated genes
+
+df <- as.data.frame(colData(dds_activated_t2)[("Treatment")])
+pheatmap(norm_upregulated, cluster_rows=TRUE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df) #2-way HC
+#Draw the heatmap using vsd values and annotating samples based on if the sample is treated or not.
+pheatmap(norm_upregulated, cluster_rows=FALSE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df)#1-way HC 
+
+```
+
+
+**Activated time point 24**
+3- Subset activated samples
+```{r}
+library(dplyr)
+meta_data2 <- data.frame(meta_data)
+activated_meta_data_t24 <- select(filter(meta_data2, Activation == "Yes", Timepoint == 24),c("Activation", "Treatment","Timepoint"))
+
+activated_samples_t24 <- row.names(activated_meta_data_t24)
+
+row_counts2 <- data.frame(raw_counts)
+activated_counts_t24 <- row_counts2 %>% select (activated_samples_t24)
+```
+4- Initiation of the installed R packages 
+```{r}
+library("DESeq2")# Recall what has been installed. 
+library("EnhancedVolcano")
+```
+5- Creation of a Deseq2 matrix  
+```{r}
+dds_activated_t24 <- DESeqDataSetFromMatrix(countData = activated_counts_t24,#DESeqData builds a deseq2 matrix with information from htseqcount combines with the experimental design file.
+                                  colData = activated_meta_data_t24,
+                                  design= ~  Treatment)# The design formula should have all of the factors in your metadata that account for major sources of variation in your data. The last factor entered in the formula should be the condition of interest.
+
+```
+6- Filtering out genes with low expression
+```{r}
+keep <- rowSums(counts(dds_activated_t24)) >= 10 # We are removing the genes with very low expression aka we are removing genes for which the sum of counts across all samples is less than 10.
+dds_activated_t24 <- dds_activated_t24 [keep,]
+dds_activated_t24
+```
+7- Differential expression analysis, VST and rlog transformation for visualistion
+```{r}
+dds_activated_t24 <- DESeq(dds_activated_t24)#In this step we perform statistical test for each gene in the dataset. The Wald test is equivalent to "t-test" that compares the mean expression value of each gene between the control stages and treatment.In other words, at this point we actually runt the differntial expression analysis.
+vsd_activated_t24 <- varianceStabilizingTransformation(dds_activated_t24)
+```
+8- Fetching results from DESeq2 run 
+```{r}
+res_activated_t24 <- results(dds_activated_t24, contrast=c("Treatment", "Yes", "No"))# c("condition", "level to compare", "control"). You can add a "," after contrast to indicate alpha = 0.05.
+library(magrittr)
+res_activated_t24 %>% data.frame() %>% View() #Look at what information is stored in the results
+```
+9- Summarize the results
+```{r}
+summary(res_activated_t24)#summurise results
+resOrdered_activated_t24 <- res_activated_t24[order(res_activated_t24$pvalue),]#order the results table by smallest padjusted value 
+write.csv(as.data.frame(resOrdered_activated_t24), file="condition_treated_activated_t24_results.csv")# save the ordered file and export the output
+head(resOrdered_activated_t24,n=10)
+```
+12- Identification of significant genes 
+A-Upregulated genes 
+```{r}
+Upregulated_activated_t24 <- resOrdered_activated_t24[ which(resOrdered_activated_t24$padj < 0.05 & resOrdered_activated_t24$log2FoldChange > 0.263), ]#From resOrderes take the ones that are statistically significant and upregulated
+summary(Upregulated_activated_t24) 
+write.csv(as.data.frame(Upregulated_activated_t24), file="Upregulated_activated_results_t24.csv")
+
+```
+B- Downregulated genes 
+```{r}
+Downregulated_activated_t24 = resOrdered_activated_t24[ which(resOrdered_activated_t24$padj < 0.05 & resOrdered_activated_t24$log2FoldChange < -0.263), ]
+summary(Downregulated_activated_t24)
+write.csv(as.data.frame(Downregulated_activated_t24), file="Downregulated_activated_results_t24.csv")
+```
+c- Create list of significant genes 
+```{r}
+Significantgenes_activated_t24 <- rbind(Upregulated_activated_t24, Downregulated_activated_t24)
+write.csv(as.data.frame(Significantgenes_activated_t24), file="Significantgenes_results_activated_t24.csv")
+Significantgenes_activated_t24 <- as.list(Significantgenes_activated_t24@rownames)
+```
+
+D- Hierarchical clustering  
+```{r}
+vsd_mat_activated_t24 <- assay(vsd_activated_t24)# Extract the vsd matrix from the object.
+
+upregulated_genes <-Upregulated_activated_t24@rownames
+vsd_mat24 <- data.frame(vsd_mat_activated_t24)
+norm_upregulated <- vsd_mat24 %>%
+  subset (row.names = ) %>%
+  data.frame #Subset the vsd valueupregulated_genes_activateds only for upregulated genes
+
+df <- as.data.frame(colData(dds_activated_t24)[("Treatment")])
+pheatmap(norm_upregulated, cluster_rows=TRUE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df) #2-way HC
+#Draw the heatmap using vsd values and annotating samples based on if the sample is treated or not.
+pheatmap(norm_upregulated, cluster_rows=FALSE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df)#1-way HC 
+
+```
+
+**Non Activated 2h**
+
+3- Subset activated samples
+```{r}
+library(dplyr)
+meta_data2 <- data.frame(meta_data)
+non_activated_meta_data_t2 <- select(filter(meta_data2, Activation == "No", Timepoint == 2),c("Activation", "Treatment","Timepoint"))
+
+non_activated_samples_t2 <- row.names(non_activated_meta_data_t2)
+
+row_counts2 <- data.frame(raw_counts)
+non_activated_counts_t2 <- row_counts2 %>% select (non_activated_samples_t2)
+```
+4- Initiation of the installed R packages 
+```{r}
+library("DESeq2")# Recall what has been installed. 
+library("EnhancedVolcano")
+```
+5- Creation of a Deseq2 matrix  
+```{r}
+dds_non_activated_t2 <- DESeqDataSetFromMatrix(countData = non_activated_counts_t2,#DESeqData builds a deseq2 matrix with information from htseqcount combines with the experimental design file.
+                                  colData = non_activated_meta_data_t2,
+                                  design= ~  Treatment)# The design formula should have all of the factors in your metadata that account for major sources of variation in your data. The last factor entered in the formula should be the condition of interest.
+
+```
+6- Filtering out genes with low expression
+```{r}
+keep <- rowSums(counts(dds_non_activated_t2)) >= 10 # We are removing the genes with very low expression aka we are removing genes for which the sum of counts across all samples is less than 10.
+dds_non_activated_t2 <- dds_non_activated_t2 [keep,]
+dds_non_activated_t2
+```
+7- Differential expression analysis, VST and rlog transformation for visualistion
+```{r}
+dds_non_activated_t2 <- DESeq(dds_non_activated_t2)#In this step we perform statistical test for each gene in the dataset. The Wald test is equivalent to "t-test" that compares the mean expression value of each gene between the control stages and treatment.In other words, at this point we actually runt the differntial expression analysis.
+vsd_non_activated_t2 <- varianceStabilizingTransformation(dds_non_activated_t2)
+```
+8- Fetching results from DESeq2 run 
+```{r}
+res_non_activated_t2 <- results(dds_non_activated_t2, contrast=c("Treatment", "Yes", "No"))# c("condition", "level to compare", "control"). You can add a "," after contrast to indicate alpha = 0.05.
+library(magrittr)
+res_non_activated_t2 %>% data.frame() %>% View() #Look at what information is stored in the results
+```
+9- Summarize the results
+```{r}
+summary(res_non_activated_t2)#summurise results
+resOrdered_non_activated_t2 <- res_non_activated_t2[order(res_non_activated_t2$pvalue),]#order the results table by smallest padjusted value 
+write.csv(as.data.frame(resOrdered_non_activated_t2), file="condition_treated_non_activated_t2_results.csv")# save the ordered file and export the output
+head(resOrdered_non_activated_t2,n=10)
+```
+10- Identification of significant genes 
+A-Upregulated genes 
+```{r}
+Upregulated_non_activated_t2 <- resOrdered_non_activated_t2[ which(resOrdered_non_activated_t2$padj < 0.05 & resOrdered_non_activated_t2$log2FoldChange > 0.263), ]#From resOrderes take the ones that are statistically significant and up-regulated
+summary(Upregulated_non_activated_t2) 
+write.csv(as.data.frame(Upregulated_non_activated_t2), file="Upregulated_non_activated_t2_results.csv")
+
+```
+B- Downregulated genes 
+```{r}
+Downregulated_non_activated_t2 = resOrdered_non_activated_t2[ which(resOrdered_non_activated_t2$padj < 0.05 & resOrdered_non_activated_t2$log2FoldChange < -0.263), ]
+summary(Downregulated_non_activated_t2)
+write.csv(as.data.frame(Downregulated_non_activated_t2), file="Downregulated_non_activated_t2_results.csv")
+```
+c- Create list of significant genes 
+```{r}
+Significantgenes_non_activated_t2 <- rbind(Upregulated_non_activated_t2, Downregulated_non_activated_t2)
+write.csv(as.data.frame(Significantgenes_non_activated_t2), file="Significantgenes_results_non_activated_t2.csv")
+Significantgenes_non_activated_t2 <- as.list(Significantgenes_non_activated_t2@rownames)
+```
+
+D- Hierarchical clustering  
+```{r}
+vsd_mat_non_activated_t2 <- assay(vsd_non_activated_t2)# Extract the vsd matrix from the object.
+
+upregulated_genes <-Upregulated_non_activated_t2@rownames
+vsd_mat2 <- data.frame(vsd_mat_non_activated_t2)
+norm_upregulated <- vsd_mat2 %>%
+  subset (row.names = ) %>%
+  data.frame #Subset the vsd valueupregulated_genes_activateds only for upregulated genes
+
+df <- as.data.frame(colData(dds_non_activated_t2)[("Treatment")])
+pheatmap(norm_upregulated, cluster_rows=TRUE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df) #2-way HC
+#Draw the heatmap using vsd values and annotating samples based on if the sample is treated or not.
+pheatmap(norm_upregulated, cluster_rows=FALSE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df)#1-way HC 
+
+```
+
+**Non Activated 24h**
+
+3- Subset activated samples
+```{r}
+library(dplyr)
+meta_data2 <- data.frame(meta_data)
+non_activated_meta_data_t24 <- select(filter(meta_data2, Activation == "No", Timepoint == 24),c("Activation", "Treatment","Timepoint"))
+
+non_activated_samples_t24 <- row.names(non_activated_meta_data_t24)
+
+row_counts2 <- data.frame(raw_counts)
+non_activated_counts_t24 <- row_counts2 %>% select (non_activated_samples_t24)
+```
+4- Initiation of the installed R packages 
+```{r}
+library("DESeq2")# Recall what has been installed. 
+library("EnhancedVolcano")
+```
+5- Creation of a Deseq2 matrix  
+```{r}
+dds_non_activated_t24 <- DESeqDataSetFromMatrix(countData = non_activated_counts_t24,#DESeqData builds a deseq2 matrix with information from htseqcount combines with the experimental design file.
+                                  colData = non_activated_meta_data_t24,
+                                  design= ~  Treatment)# The design formula should have all of the factors in your metadata that account for major sources of variation in your data. The last factor entered in the formula should be the condition of interest.
+
+```
+6- Filtering out genes with low expression
+```{r}
+keep <- rowSums(counts(dds_non_activated_t24)) >= 10 # We are removing the genes with very low expression aka we are removing genes for which the sum of counts across all samples is less than 10.
+dds_non_activated_t24 <- dds_non_activated_t24 [keep,]
+dds_non_activated_t24
+```
+7- Differential expression analysis, VST and rlog transformation for visualistion
+```{r}
+dds_non_activated_t24 <- DESeq(dds_non_activated_t24)#In this step we perform statistical test for each gene in the dataset. The Wald test is equivalent to "t-test" that compares the mean expression value of each gene between the control stages and treatment.In other words, at this point we actually runt the differntial expression analysis.
+vsd_non_activated_t24 <- varianceStabilizingTransformation(dds_non_activated_t24)
+```
+8- Fetching results from DESeq2 run 
+```{r}
+res_non_activated_t24 <- results(dds_non_activated_t24, contrast=c("Treatment", "Yes", "No"))# c("condition", "level to compare", "control"). You can add a "," after contrast to indicate alpha = 0.05.
+library(magrittr)
+res_non_activated_t24 %>% data.frame() %>% View() #Look at what information is stored in the results
+```
+9- Summarize the results
+```{r}
+summary(res_non_activated_t24)#summurise results
+resOrdered_non_activated_t24 <- res_non_activated_t24[order(res_non_activated_t24$pvalue),]#order the results table by smallest padjusted value 
+write.csv(as.data.frame(resOrdered_non_activated_t24), file="condition_treated_non_activated_t24_results.csv")# save the ordered file and export the output
+head(resOrdered_non_activated_t24,n=10)
+```
+10- Identification of significant genes 
+A-Upregulated genes 
+```{r}
+Upregulated_non_activated_t24 <- resOrdered_non_activated_t24[ which(resOrdered_non_activated_t24$padj < 0.05 & resOrdered_non_activated_t24$log2FoldChange > 0.263), ]#From resOrderes take the ones that are statistically significant and up-regulated
+summary(Upregulated_non_activated_t24) 
+write.csv(as.data.frame(Upregulated_non_activated_t24), file="Upregulated_non_activated_t24_results.csv")
+
+```
+B- Downregulated genes 
+```{r}
+Downregulated_non_activated_t24 = resOrdered_non_activated_t24[ which(resOrdered_non_activated_t24$padj < 0.05 & resOrdered_non_activated_t24$log2FoldChange < -0.263), ]
+summary(Downregulated_non_activated_t24)
+write.csv(as.data.frame(Downregulated_non_activated_t24), file="Downregulated_non_activated_t24_results.csv")
+```
+c- Create list of significant genes 
+```{r}
+Significantgenes_non_activated_t24 <- rbind(Upregulated_non_activated_t24, Downregulated_non_activated_t24)
+write.csv(as.data.frame(Significantgenes_non_activated_t24), file="Significantgenes_results_non_activated_t24.csv")
+Significantgenes_non_activated_t24 <- as.list(Significantgenes_non_activated_t24@rownames)
+```
+
+D- Hierarchical clustering  
+```{r}
+vsd_mat_non_activated_t24 <- assay(vsd_non_activated_t24)# Extract the vsd matrix from the object.
+
+upregulated_genes <-Upregulated_non_activated_t24@rownames
+vsd_mat2 <- data.frame(vsd_mat_non_activated_t24)
+norm_upregulated <- vsd_mat2 %>%
+  subset (row.names = ) %>%
+  data.frame #Subset the vsd valueupregulated_genes_activateds only for upregulated genes
+
+df <- as.data.frame(colData(dds_non_activated_t24)[("Treatment")])
+pheatmap(norm_upregulated, cluster_rows=TRUE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df) #2-way HC
+#Draw the heatmap using vsd values and annotating samples based on if the sample is treated or not.
+pheatmap(norm_upregulated, cluster_rows=FALSE, show_rownames=FALSE, cluster_cols=TRUE, annotation_col=df)#1-way HC 
+
+```
+*Venn diagram padj < 0.05 *
+```{r}
+install.packages("VennDiagram")
+library(VennDiagram)
+vp <- venn.diagram(list( NA_T_24 = Significantgenes_non_activated_t24, NA_T_2 = Significantgenes_non_activated_t2 , A_T_2= Significantgenes_activated_t2 ,A_T_24= Significantgenes_activated_t24), 
+                   #fill = c("yellow", "chartreuse3", "indianred1", "cyan"),
+                   fill = 2:5, filename = NULL);
+grid.draw(vp)
+```
+
+
+
+
